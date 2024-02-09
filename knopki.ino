@@ -3,7 +3,7 @@
 #include <WiFiAP.h>
 #include <driver/dac.h>
 
-#define LED_BUILTIN 2 
+#define LED_BUILTIN 2
 
 #define number_of_74hc595s 2
 #define numOfRegisterPins (number_of_74hc595s * 8)
@@ -21,8 +21,26 @@
 
 // Control panel pins
 #define KEY_5_Pin 5
-#define KEY_6_Pin 18 
+#define KEY_6_Pin 18
 #define KEY_7_Pin 19
+
+// LEDs
+#define KEY_1_LED 9
+#define KEY_2_LED 10
+#define KEY_3_LED 11
+#define KEY_4_LED 12
+
+#define KEY_RED_LED 14
+#define KEY_GREEN_LED 13
+
+#define SEG_A_LED 1
+#define SEG_B_LED 5
+#define SEG_C_LED 3
+#define SEG_D_LED 6
+#define SEG_E_LED 0
+#define SEG_F_LED 2
+#define SEG_G_LED 4
+#define SEG_DP_LED 7
 
 // 0-7 - 7-segment display, including dot
 // 8-11 - key indicator leds
@@ -46,36 +64,59 @@ enum {
 struct {
   int key_6_delay;
   int key_6_random;
+  int key_6_timer;
   int key_7_delay;
   int key_7_random;
-  int timer_time;
+  int key_7_timer;
+
   int timer_pause;
-} keys_config;
+  int display_delay;
+
+  int signal_volume;
+} keys_config = {
+  0, 0, 7,
+  0, 0, 20,
+  3, 4,
+  8
+};
 
 // Player number to print (1-4)
 int player_number;
 
 // Time when the last event happend
-int last_event_time;
+unsigned int last_event_time;
 
-int timer_off_time;
+// Time we turn off the timer
+unsigned int timer_off_time;
+
+// Time we wait in the timer.
+unsigned int timer_wait_time;
 
 // Time when we switch from RANDOM_WAIT to STARTED
-int start_time;
+unsigned int start_time;
 
+// Display update needed flag.
 bool update_display;
-int next_update_time;
+
+// Time to do the next display update
+unsigned int next_update_time;
+
+void beep_1();
+void clearRegisters();
 
 // Key press interrupt handler
-void IRAM_ATTR ISR() {
+void IRAM_ATTR ISR()
+{
     switch (state) {
       case STATE_INITIAL:
          {
-            int delay = 0; 
-            if (digitalRead(KEY_6_Pin) == 0) {
+            int delay = 0;
+            if (digitalRead(KEY_6_Pin)==LOW) {
               delay = keys_config.key_6_delay*1000+random(keys_config.key_6_random*1000)+1;
-            } else if (digitalRead(KEY_7_Pin) == 0) {
+              timer_wait_time = keys_config.key_6_timer;
+            } else if (digitalRead(KEY_7_Pin)==LOW) {
               delay = keys_config.key_7_delay*1000+random(keys_config.key_7_random*1000)+1;
+              timer_wait_time = keys_config.key_7_timer;
             }
             if (delay != 0) {
               last_event_time = millis();
@@ -84,17 +125,18 @@ void IRAM_ATTR ISR() {
               update_display = true;
               break;
             }
-         }   
+         }
       case STATE_RANDOM_WAIT:
       case STATE_TIMER_STARTED:
+      case STATE_TIMER_ENDED:
             player_number = 0;
-            if (digitalRead(KEY_1_Pin) == 0) {
+            if (digitalRead(KEY_1_Pin)==LOW) {
               player_number = 1;
-            } else if (digitalRead(KEY_2_Pin) == 0) {
+            } else if (digitalRead(KEY_2_Pin) == LOW) {
               player_number = 2;
-            } else if (digitalRead(KEY_3_Pin) == 0) {
+            } else if (digitalRead(KEY_3_Pin) == LOW) {
               player_number = 3;
-            } else if (digitalRead(KEY_4_Pin) == 0) {
+            } else if (digitalRead(KEY_4_Pin) == LOW) {
               player_number = 4;
             }
             if (player_number != 0) {
@@ -104,6 +146,7 @@ void IRAM_ATTR ISR() {
                 state = STATE_SHOW_FALSE_START;
               }
               last_event_time = millis();
+              timer_off_time = last_event_time+keys_config.display_delay*1000;
               update_display = true;
               break;
             }
@@ -113,6 +156,154 @@ void IRAM_ATTR ISR() {
       state = STATE_INITIAL;
       update_display = true;
     }
+}
+
+void display_updater(int t)
+{
+  switch (state) {
+  case STATE_INITIAL:
+      Serial.printf("STATE_INITIAL %d\n", t);
+      // Blank all the leds.
+      clearRegisters();
+      next_update_time = t+10000; // Never update
+      break;
+  case STATE_RANDOM_WAIT:
+      Serial.println("STATE_RANDOM_WAIT");
+      if (t < start_time) {
+        next_update_time = start_time;
+        break;
+      }
+      timer_off_time = t+timer_wait_time*1000;
+      state = STATE_TIMER_STARTED;
+
+  case STATE_TIMER_STARTED:
+      Serial.println("STATE_STARTED");
+      if (t>=timer_off_time) {
+        state = STATE_TIMER_ENDED;
+        timer_off_time = t+keys_config.timer_pause*1000;
+        update_display = true;
+        break;
+      }
+
+      setRegisterPin(0, t>timer_off_time+7000);
+      setRegisterPin(1, t>timer_off_time+6000);
+      setRegisterPin(2, t>timer_off_time+5000);
+      setRegisterPin(3, t>timer_off_time+4000);
+      setRegisterPin(4, t>timer_off_time+3000);
+      setRegisterPin(5, t>timer_off_time+2000);
+      setRegisterPin(6, t>timer_off_time+1000);
+      setRegisterPin(7, true);
+      next_update_time = t+1000;
+      break;
+
+  case STATE_TIMER_ENDED:
+      Serial.println("STATE_ENDED");
+      clearRegisters();
+      if (t>=timer_off_time) {
+        state = STATE_INITIAL;
+        update_display = true;
+        break;
+      }
+      setRegisterPin(SEG_DP_LED, HIGH);
+      break;
+
+  case STATE_SHOW_PLAYER:
+  case STATE_SHOW_FALSE_START:
+      clearRegisters();
+
+      if (t >= timer_off_time) {
+        state = STATE_INITIAL;
+        break;
+      }
+
+      // Display the player number on LEDs (7segment and key leds).
+      switch (player_number) {
+      case 1:
+        setRegisterPin(SEG_C_LED, HIGH);
+        setRegisterPin(SEG_B_LED, HIGH);
+
+        setRegisterPin(KEY_1_LED, HIGH);
+        break;
+
+      case 2:
+        setRegisterPin(SEG_A_LED, HIGH);
+        setRegisterPin(SEG_B_LED, HIGH);
+        setRegisterPin(SEG_G_LED, HIGH);
+        setRegisterPin(SEG_E_LED, HIGH);
+        setRegisterPin(SEG_D_LED, HIGH);
+
+        setRegisterPin(KEY_2_LED, 1);
+        break;
+
+      case 3:
+        setRegisterPin(SEG_A_LED, HIGH);
+        setRegisterPin(SEG_B_LED, HIGH);
+        setRegisterPin(SEG_C_LED, HIGH);
+        setRegisterPin(SEG_D_LED, HIGH);
+        setRegisterPin(SEG_G_LED, HIGH);
+
+        setRegisterPin(KEY_3_LED, HIGH);
+        break;
+
+      case 4:
+        setRegisterPin(SEG_B_LED, HIGH);
+        setRegisterPin(SEG_C_LED, HIGH);
+        setRegisterPin(SEG_G_LED, HIGH);
+        setRegisterPin(SEG_F_LED, HIGH);
+
+        setRegisterPin(KEY_4_LED, HIGH);
+        break;
+      }
+      if (state == STATE_SHOW_PLAYER) {
+        // Turn on Green LED
+        setRegisterPin(KEY_GREEN_LED, HIGH);
+        next_update_time = timer_off_time;
+
+        if (t<last_event_time+100) {
+          beep_1();
+        }
+      } else {
+        // Turn on Red LED
+        setRegisterPin(KEY_RED_LED, HIGH);
+
+        // Blink the 7-segment display
+        if ((t-last_event_time) % 500 > 200) {
+          for (int i=0; i<8; i++) {
+            setRegisterPin(i, LOW);
+          }
+        }
+        if (t<last_event_time+100 || t>last_event_time+200 && t<last_event_time+300) {
+          beep_1();
+        }
+        next_update_time = t+100;
+      }
+  }
+}
+
+// Blink all the LEDs at startup
+void welcome_display()
+{
+  clearRegisters();
+
+  for (int i=0; i<16; i++) {
+    setRegisterPin(i, HIGH);
+    writeRegisters();
+    delay(100);
+  }
+
+  beep_1();
+
+  for (int i=0; i<16; i++) {
+    setRegisterPin(i, LOW);
+    writeRegisters();
+    delay(100);
+  }
+
+  beep_1();
+  delay(50);
+  beep_1();
+
+  clearRegisters();
 }
 
 void setup()
@@ -139,7 +330,7 @@ void setup()
   pinMode(RCLK_Pin, OUTPUT);
   pinMode(SRCLK_Pin, OUTPUT);
   pinMode(SPEAKER_PIN, OUTPUT);
-  
+
   dac_output_enable(DAC_CHANNEL_2);
   clearRegisters();
   writeRegisters();
@@ -151,7 +342,7 @@ void setup()
   pinMode(KEY_5_Pin, INPUT);
   pinMode(KEY_6_Pin, INPUT);
   pinMode(KEY_7_Pin, INPUT);
-  
+
   attachInterrupt(KEY_1_Pin, ISR, FALLING);
   attachInterrupt(KEY_2_Pin, ISR, FALLING);
   attachInterrupt(KEY_3_Pin, ISR, FALLING);
@@ -159,13 +350,15 @@ void setup()
   attachInterrupt(KEY_5_Pin, ISR, FALLING);
   attachInterrupt(KEY_6_Pin, ISR, FALLING);
   attachInterrupt(KEY_7_Pin, ISR, FALLING);
+
+  welcome_display();
 }
 
 const uint8_t sineLookupTable[] = {
 0, 0, 1, 2, 4,
 6, 9, 12, 16, 20, 24, 29, 35,
 40, 46, 53, 59, 66, 73, 81, 88,
-96, 104, 112, 119
+96, 104, 112, 119,
 128, 136, 143, 151, 159, 167, 174, 182,
 189, 196, 202, 209, 215, 220, 226, 231,
 235, 239, 243, 246, 249, 251, 253, 254,
@@ -179,72 +372,28 @@ const uint8_t sineLookupTable[] = {
 
 void beep_signal()
 {
-    static int s = 0;
-    dac_output_voltage(DAC_CHANNEL_2, sineLookupTable[s]);
-    s++;
-    if (s==100) {
-      s = 0;
-    }
+  for (int i=0; i<100; i++) {
+    dac_output_voltage(DAC_CHANNEL_2, sineLookupTable[i]*keys_config.signal_volume/8);
+  }
 }
 
-void display_updater(int t)
+void beep_1()
 {
-  switch (state) {
-  case STATE_INITIAL:
-      // Blank all the leds.
-      clearRegisters();
-      break;
-  case STATE_RANDOM_WAIT:
-      if (t < start_time) {
-        next_update_time = start_time;
-        break;
-      }
-      timer_off_time = t+keys_config.timer_time*1000;
-      state = STATE_TIMER_STARTED;
-      
-  case STATE_TIMER_STARTED:
-      if (t>=timer_off_time) {
-        state = STATE_TIMER_ENDED;
-        timer_off_time = t+keys_config.timer_pause*1000;
-        update_display = true;
-        break;
-      }
-      
-      setRegisterPin(0, t>timer_off_time+7000);
-      setRegisterPin(1, t>timer_off_time+6000);
-      setRegisterPin(2, t>timer_off_time+5000);
-      setRegisterPin(3, t>timer_off_time+4000);
-      setRegisterPin(4, t>timer_off_time+3000);
-      setRegisterPin(5, t>timer_off_time+2000);
-      setRegisterPin(6, t>timer_off_time+1000);
-      setRegisterPin(7, true);
-      next_update_time = t+1000;
-      break;
-      
-  case STATE_TIMER_ENDED:
-      for (int i=0; i<=7; i++) {
-        setRegisterPin(i, 0);
-      }
-      if (t>=timer_off_time) { 
-        state = STATE_INITIAL;
-        update_display = true;
-        break;
-      }
-      setRegisterPin(0, true);
-      break;
+  for (int i=0; i<200; i++) {
+    beep_signal();
   }
 }
 
 void loop()
 {
-  int t = millis();
+  unsigned int t = millis();
   serve_wifi_client();
   if (update_display || t > next_update_time) {
-     display_updater(t);
-     writeGrpRelay();
-     update_display = false;
+    Serial.printf("loop %d %d\n", update_display, t);
+    display_updater(t);
+    writeRegisters();
+    update_display = false;
   }
-  beep_signal();
 }
 
 void serve_wifi_client()
@@ -301,14 +450,17 @@ void serve_wifi_client()
 
 void clearRegisters()
 {
-  for (int i = numOfRegisterPins-1; i >=0; i--){
+  for (int i=0; i<8; i++){
+     registers[i] = HIGH;
+  }
+  for (int i=8; i<16; i++){
      registers[i] = LOW;
   }
 }
 
 void writeRegisters()
 {
-  // Write register after being set 
+  // Write register after being set
   digitalWrite(RCLK_Pin, LOW);
   for (int i = numOfRegisterPins-1; i>=0; i--){
     digitalWrite(SRCLK_Pin, LOW);
@@ -321,22 +473,9 @@ void writeRegisters()
 
 void setRegisterPin(int index, int value)
 {
+  // First 8 pins (7-segment indicator) have reverse logic
+  if (index<8) {
+    value=!value;
+  }
   registers[index] = value;
-}
-
-void writeGrpRelay()
-{
-  for (int i = numOfRegisterPins-1; i >= 	0; i--){
- 		Serial.print(F("Relay "));Serial.print(i);Serial.println(F(" HIGH"));
- 		setRegisterPin(i, LOW);
-  }
-  writeRegisters();
-  delay(200);
-  for (int i = numOfRegisterPins-1; i >= 0; i--){
-     Serial.print(F("Relay "));Serial.print(i);Serial.println(F(" LOW"));
-     setRegisterPin(i, HIGH);
-     writeRegisters();
-     delay(500); 				
-  }
-  writeRegisters();
 }
