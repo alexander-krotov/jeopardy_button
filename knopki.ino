@@ -162,6 +162,10 @@ void setup()
 }
 
 const uint8_t sineLookupTable[] = {
+0, 0, 1, 2, 4,
+6, 9, 12, 16, 20, 24, 29, 35,
+40, 46, 53, 59, 66, 73, 81, 88,
+96, 104, 112, 119
 128, 136, 143, 151, 159, 167, 174, 182,
 189, 196, 202, 209, 215, 220, 226, 231,
 235, 239, 243, 246, 249, 251, 253, 254,
@@ -170,11 +174,8 @@ const uint8_t sineLookupTable[] = {
 202, 196, 189, 182, 174, 167, 159, 151,
 143, 136, 128, 119, 112, 104, 96, 88,
 81, 73, 66, 59, 53, 46, 40, 35,
-29, 24, 20, 16, 12, 9, 6, 4,
-2, 1, 0, 0, 0, 1, 2, 4,
-6, 9, 12, 16, 20, 24, 29, 35,
-40, 46, 53, 59, 66, 73, 81, 88,
-96, 104, 112, 119};
+29, 24, 20, 16, 12, 9, 6, 4, 2, 1, 0
+};
 
 void beep_signal()
 {
@@ -301,21 +302,21 @@ void serve_wifi_client()
 void clearRegisters()
 {
   for (int i = numOfRegisterPins-1; i >=0; i--){
- 	  registers[i] = LOW;
+     registers[i] = LOW;
   }
 }
 
 void writeRegisters()
 {
-  //// Write register after being set 
+  // Write register after being set 
   digitalWrite(RCLK_Pin, LOW);
   for (int i = numOfRegisterPins-1; i>=0; i--){
- 	  digitalWrite(SRCLK_Pin, LOW);
+    digitalWrite(SRCLK_Pin, LOW);
     int val = registers[i];
- 	  digitalWrite(SER_Pin, val);
- 	  digitalWrite(SRCLK_Pin, HIGH);
+    digitalWrite(SER_Pin, val);
+    digitalWrite(SRCLK_Pin, HIGH);
   }
- 	digitalWrite(RCLK_Pin, HIGH);
+  digitalWrite(RCLK_Pin, HIGH);
 }
 
 void setRegisterPin(int index, int value)
@@ -329,14 +330,13 @@ void writeGrpRelay()
  		Serial.print(F("Relay "));Serial.print(i);Serial.println(F(" HIGH"));
  		setRegisterPin(i, LOW);
   }
-	writeRegisters();
-
- 	delay(200);
-  for (int i = numOfRegisterPins-1; i >= 	0; i--){
- 		Serial.print(F("Relay "));Serial.print(i);Serial.println(F(" LOW"));
- 		setRegisterPin(i, HIGH);
- 		writeRegisters();
- 	  delay(500); 				
+  writeRegisters();
+  delay(200);
+  for (int i = numOfRegisterPins-1; i >= 0; i--){
+     Serial.print(F("Relay "));Serial.print(i);Serial.println(F(" LOW"));
+     setRegisterPin(i, HIGH);
+     writeRegisters();
+     delay(500); 				
   }
- 	writeRegisters();
+  writeRegisters();
 }
