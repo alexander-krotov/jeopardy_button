@@ -8,6 +8,9 @@
 #include <WiFiAP.h>
 #include <driver/dac.h>
 
+#include <GyverPortal.h>
+#include <EEPROM.h>
+
 #define LED_BUILTIN 2
 
 #define number_of_74hc595s 2
@@ -47,6 +50,8 @@
 #define SEG_G_LED 4
 #define SEG_DP_LED 7
 
+GyverPortal ui;
+
 // 0-7 - 7-segment display, including dot
 // 8-11 - key indicator leds
 boolean registers [numOfRegisterPins];
@@ -54,8 +59,6 @@ boolean registers [numOfRegisterPins];
 // WiFi AP credentials.
 const char *ssid = "knopki";
 const char *password = "knopki73";
-
-WiFiServer server(80);
 
 enum {
     STATE_INITIAL,
@@ -299,6 +302,102 @@ void display_updater(int t)
   }
 }
 
+struct LoginPass {
+  char ssid[20];
+  char pass[20];
+};
+
+LoginPass lp;
+
+void build() {
+  Serial.println("BUILD");
+
+  GP.BUILD_BEGIN();
+  GP.THEME(GP_DARK);
+  GP.FORM_BEGIN("/");
+  
+  GP_MAKE_BLOCK_TAB(
+    "Timer 1",
+    GP_MAKE_BOX(GP.LABEL("Time:"); GP.NUMBER("key_6_timer", "", keys_config.key_6_timer););
+    GP_MAKE_BOX(GP.LABEL("Fixed delay:"); GP.NUMBER("key_6_delay", "", keys_config.key_6_delay););
+    GP_MAKE_BOX(GP.LABEL("Random delay:"); GP.NUMBER("key_6_random", "", keys_config.key_6_random););
+  );
+  GP_MAKE_BLOCK_TAB(
+    "Timer 2",
+    GP_MAKE_BOX(GP.LABEL("Time:"); GP.NUMBER("key_7_timer", "", keys_config.key_7_timer););
+    GP_MAKE_BOX(GP.LABEL("Fixed delay:"); GP.NUMBER("key_7_delay", "", keys_config.key_7_delay););
+    GP_MAKE_BOX(GP.LABEL("Random delay:"); GP.NUMBER("key_7_random", "", keys_config.key_7_random););
+  );
+  GP_MAKE_BOX(GP.LABEL("Timer pause:"); GP.NUMBER("timer_pause", "", keys_config.timer_pause););
+  GP_MAKE_BOX(GP.LABEL("Display time:"); GP.NUMBER("display_delay", "", keys_config.display_delay););
+  GP_MAKE_BOX(GP.LABEL("Signal volume:"); GP.NUMBER("signal_volume", "", keys_config.signal_volume););
+  GP_MAKE_BOX(GP.LABEL("Coundown beep"); GP.SWITCH("countdown_beep", keys_config.countdown_beep););
+  
+  GP.SUBMIT("UPDATE");
+
+  GP.FORM_END();
+  GP.BUILD_END();
+}
+
+void action(GyverPortal& p) {
+  Serial.println("ACTION");
+
+  if (p.form("/")) {
+    int n;
+
+    // Reed the new values, and check them for sanity.
+    n = ui.getInt("key_6_timer");
+    if (n>=0 && n<=20) {
+      keys_config.key_6_timer = n;
+    }
+    
+    n = ui.getInt("key_7_timer");
+    if (n>=0 && n<=20) {
+      keys_config.key_7_timer = n;
+    }
+
+    n = ui.getInt("key_6_delay");
+    if (n>=0 && n<=20) {
+      keys_config.key_6_delay = n;
+    }
+    
+    n = ui.getInt("key_7_delay");
+    if (n>=0 && n<=20) {
+      keys_config.key_7_delay = n;
+    }
+
+    n = ui.getInt("key_6_random");
+    if (n>=0 && n<=20) {
+      keys_config.key_6_random = n;
+    }
+
+    n = ui.getInt("key_7_random");
+    if (n>=0 && n<=20) {
+      keys_config.key_7_random = n;
+    }
+
+    n = ui.getInt("timer_pause");
+    if (n>=1 && n<=20) {
+      keys_config.timer_pause = n;
+    }
+
+    n = ui.getInt("display_delay");
+    if (n>=1 && n<=20) {
+      keys_config.display_delay = n;
+    }
+
+    n = ui.getInt("signal_volume");
+    if (n>=0 && n<=8) {
+      keys_config.signal_volume = n;
+    }
+    keys_config.countdown_beep = ui.getBool("countdown_beep");
+
+    // Save the config to eeprom
+    EEPROM.put(0, keys_config);
+    EEPROM.commit();
+  }
+}
+
 // Blink all the LEDs at startup
 void welcome_display()
 {
@@ -341,7 +440,12 @@ void setup()
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
-  server.begin();
+  /// server.begin();
+
+  // start server portal
+  ui.attachBuild(build);
+  ui.attach(action);
+  ui.start();
 
   Serial.println("Server started");
 
@@ -369,6 +473,10 @@ void setup()
   attachInterrupt(KEY_5_Pin, ISR, FALLING);
   attachInterrupt(KEY_6_Pin, ISR, FALLING);
   attachInterrupt(KEY_7_Pin, ISR, FALLING);
+
+  // Read the saved config values
+  EEPROM.begin(100);
+  EEPROM.get(0, keys_config);
 
   welcome_display();
 }
@@ -412,7 +520,7 @@ void loop()
   // Current time
   unsigned int t = millis();
 
-  serve_wifi_client();
+  ui.tick();
   
   // Update the display if needed.
   if (update_display || t > next_update_time) {
@@ -422,58 +530,6 @@ void loop()
     // Send updated display to the shift registers
     writeRegisters();
     update_display = false;
-  }
-}
-
-void serve_wifi_client()
-{
-  WiFiClient client = server.available();   // listen for incoming clients
-
-  if (client) {                             // if you get a client,
-    Serial.println("New Client.");          // print a message out the serial port
-    String currentLine = "";                // make a String to hold incoming data from the client
-    while (client.connected()) {            // loop while the client's connected
-      if (client.available()) {             // if there's bytes to read from the client,
-        char c = client.read();             // read a byte, then
-        Serial.write(c);                    // print it out the serial monitor
-        if (c == '\n') {                    // if the byte is a newline character
-
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println();
-
-            // the content of the HTTP response follows the header:
-            client.print("Click <a href=\"/H\">here</a> to turn ON the LED.<br>");
-            client.print("Click <a href=\"/L\">here</a> to turn OFF the LED.<br>");
-
-            // The HTTP response ends with another blank line:
-            client.println();
-            // break out of the while loop:
-            break;
-          } else {    // if you got a newline, then clear currentLine:
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-
-        // Check to see if the client request was "GET /H" or "GET /L":
-        if (currentLine.endsWith("GET /H")) {
-          digitalWrite(LED_BUILTIN, HIGH);               // GET /H turns the LED on
-        }
-        if (currentLine.endsWith("GET /L")) {
-          digitalWrite(LED_BUILTIN, LOW);                // GET /L turns the LED off
-        }
-      }
-    }
-    // close the connection:
-    client.stop();
-    Serial.println("Client Disconnected.");
   }
 }
 
