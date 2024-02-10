@@ -1,3 +1,8 @@
+// Software part for Jeopardy-like game project.
+//
+// Project docs, hardware and license:
+// https://github.com/alexander-krotov/jeopardy_button
+
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <WiFiAP.h>
@@ -73,11 +78,13 @@ struct {
   int display_delay;
 
   int signal_volume;
+  bool countdown_beep;
 } keys_config = {
   0, 0, 7,
   0, 0, 20,
   3, 4,
-  8
+  8,
+  true
 };
 
 // Player number to print (1-4)
@@ -158,6 +165,10 @@ void IRAM_ATTR ISR()
     }
 }
 
+// Update the display leds, according to the current system state
+// and current time in milliseconds (parameter t).
+// It uses global next_update_time to say it wants to be woken up
+// next time, in case no state changes were made.
 void display_updater(int t)
 {
   switch (state) {
@@ -185,20 +196,28 @@ void display_updater(int t)
         break;
       }
 
-      setRegisterPin(0, t>timer_off_time+7000);
-      setRegisterPin(1, t>timer_off_time+6000);
-      setRegisterPin(2, t>timer_off_time+5000);
-      setRegisterPin(3, t>timer_off_time+4000);
-      setRegisterPin(4, t>timer_off_time+3000);
-      setRegisterPin(5, t>timer_off_time+2000);
-      setRegisterPin(6, t>timer_off_time+1000);
-      setRegisterPin(7, true);
+      // Show remaining time in the 7-segment display.
+      // The segments will dissapear one by one, every second.
+      setRegisterPin(SEG_E_LED, t<=timer_off_time-7000);
+      setRegisterPin(SEG_A_LED, t<=timer_off_time-6000);
+      setRegisterPin(SEG_D_LED, t<=timer_off_time-5000);
+      setRegisterPin(SEG_B_LED, t<=timer_off_time-4000);
+      setRegisterPin(SEG_F_LED, t<=timer_off_time-3000);
+      setRegisterPin(SEG_G_LED, t<=timer_off_time-2000);
+      setRegisterPin(SEG_C_LED, t<=timer_off_time-1000);
+
+      // Last three seconds - make a short beep every second.
+      if (keys_config.countdown_beep && t<=t-3000) {
+        beep_1();
+      }
       next_update_time = t+1000;
       break;
 
   case STATE_TIMER_ENDED:
       Serial.println("STATE_ENDED");
       clearRegisters();
+      beep_1();
+      beep_1();
       if (t>=timer_off_time) {
         state = STATE_INITIAL;
         update_display = true;
@@ -370,13 +389,17 @@ const uint8_t sineLookupTable[] = {
 29, 24, 20, 16, 12, 9, 6, 4, 2, 1, 0
 };
 
+// Send one full sine wave to the speaker.
 void beep_signal()
 {
   for (int i=0; i<100; i++) {
     dac_output_voltage(DAC_CHANNEL_2, sineLookupTable[i]*keys_config.signal_volume/8);
   }
+  // Important so set the voltage to 0 in the end, to avoid extra current
+  // remaining through the speaker.
 }
 
+// Send 200 sine waves to the speaker. It makaes a short beep sound.
 void beep_1()
 {
   for (int i=0; i<200; i++) {
@@ -386,11 +409,17 @@ void beep_1()
 
 void loop()
 {
+  // Current time
   unsigned int t = millis();
+
   serve_wifi_client();
+  
+  // Update the display if needed.
   if (update_display || t > next_update_time) {
     Serial.printf("loop %d %d\n", update_display, t);
     display_updater(t);
+
+    // Send updated display to the shift registers
     writeRegisters();
     update_display = false;
   }
@@ -448,6 +477,7 @@ void serve_wifi_client()
   }
 }
 
+// Clear the shift registers, all the LEDs get blank.
 void clearRegisters()
 {
   for (int i=0; i<8; i++){
@@ -458,6 +488,7 @@ void clearRegisters()
   }
 }
 
+// Write the registers two sequential 74hc565
 void writeRegisters()
 {
   // Write register after being set
