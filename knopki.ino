@@ -50,6 +50,7 @@
 #define SEG_G_LED 4
 #define SEG_DP_LED 7
 
+// Web interface
 GyverPortal ui;
 
 // 0-7 - 7-segment display, including dot
@@ -60,6 +61,7 @@ boolean registers [numOfRegisterPins];
 const char *ssid = "knopki";
 const char *password = "knopki73";
 
+// System states
 enum {
     STATE_INITIAL,
     STATE_RANDOM_WAIT,
@@ -69,19 +71,24 @@ enum {
     STATE_SHOW_FALSE_START
 } state;
 
+// Coniguration parameters.
 struct {
-  int key_6_delay;
-  int key_6_random;
-  int key_6_timer;
-  int key_7_delay;
-  int key_7_random;
-  int key_7_timer;
+  // Timer 1
+  int key_6_delay;    // INITIAL -> TIMER_STARTED
+  int key_6_random;   // INITIAL -> TIMER_STARTED`
+  int key_6_timer;    // TIMER_STARTED -> TIMER_ENDED
 
-  int timer_pause;
-  int display_delay;
+  // Timer 2
+  int key_7_delay;    // INITIAL -> TIMER_STARTED
+  int key_7_random;   // INITIAL -> TIMER_STARTED
+  int key_7_timer;    // TIMER_STARTED -> TIMER_ENDED
 
-  int signal_volume;
-  bool countdown_beep;
+  int timer_pause;    // TIMER_ENDED -> INITIAL
+  int display_delay;  // SHOW_PLAYER, SHOW_FALSE_START -> INITIAL
+
+  int signal_volume;  // Sound signal volume (0-8)
+
+  bool countdown_beep;  // Signal countdown enabled (last 3 seconds in TIMER_STARTED)
 } keys_config = {
   0, 0, 7,
   0, 0, 20,
@@ -96,23 +103,20 @@ int player_number;
 // Time when the last event happend
 unsigned int last_event_time;
 
-// Time we turn off the timer
+// Time to do the next display update
+unsigned int next_update_time;
+
+// Time we turn off the timer (set from key_6_delay or key_7_delay)
 unsigned int timer_off_time;
 
-// Time we wait in the timer.
+// Time we wait in the timer (TIMER_STARTED->TIMER_ENDED)
 unsigned int timer_wait_time;
 
-// Time when we switch from RANDOM_WAIT to STARTED
+// Time when we switch from RANDOM_WAIT to STARTED (RANDOM_WAIT->TIMER_STARTED)
 unsigned int start_time;
 
 // Display update needed flag.
 bool update_display;
-
-// Time to do the next display update
-unsigned int next_update_time;
-
-void beep_1();
-void clearRegisters();
 
 // Key press interrupt handler
 void IRAM_ATTR ISR()
@@ -140,7 +144,7 @@ void IRAM_ATTR ISR()
       case STATE_TIMER_STARTED:
       case STATE_TIMER_ENDED:
             player_number = 0;
-            if (digitalRead(KEY_1_Pin)==LOW) {
+            if (digitalRead(KEY_1_Pin) == LOW) {
               player_number = 1;
             } else if (digitalRead(KEY_2_Pin) == LOW) {
               player_number = 2;
@@ -161,7 +165,7 @@ void IRAM_ATTR ISR()
               break;
             }
     }
-    if (digitalRead(KEY_5_Pin) == 0) {
+    if (digitalRead(KEY_5_Pin) == LOW) {
       // Cleanup key pressed.
       state = STATE_INITIAL;
       update_display = true;
@@ -281,7 +285,7 @@ void display_updater(int t)
         setRegisterPin(KEY_GREEN_LED, HIGH);
         next_update_time = timer_off_time;
 
-        if (t<last_event_time+100) {
+        if (t < last_event_time+100) {
           beep_1();
         }
       } else {
@@ -302,20 +306,15 @@ void display_updater(int t)
   }
 }
 
-struct LoginPass {
-  char ssid[20];
-  char pass[20];
-};
-
-LoginPass lp;
-
-void build() {
+// Create a configuration form
+void build()
+{
   Serial.println("BUILD");
 
   GP.BUILD_BEGIN();
   GP.THEME(GP_DARK);
   GP.FORM_BEGIN("/");
-  
+
   GP_MAKE_BLOCK_TAB(
     "Timer 1",
     GP_MAKE_BOX(GP.LABEL("Time:"); GP.NUMBER("key_6_timer", "", keys_config.key_6_timer););
@@ -332,14 +331,16 @@ void build() {
   GP_MAKE_BOX(GP.LABEL("Display time:"); GP.NUMBER("display_delay", "", keys_config.display_delay););
   GP_MAKE_BOX(GP.LABEL("Signal volume:"); GP.NUMBER("signal_volume", "", keys_config.signal_volume););
   GP_MAKE_BOX(GP.LABEL("Coundown beep"); GP.SWITCH("countdown_beep", keys_config.countdown_beep););
-  
+
   GP.SUBMIT("UPDATE");
 
   GP.FORM_END();
   GP.BUILD_END();
 }
 
-void action(GyverPortal& p) {
+// Read the configuration from a form
+void action(GyverPortal& p)
+{
   Serial.println("ACTION");
 
   if (p.form("/")) {
@@ -350,7 +351,7 @@ void action(GyverPortal& p) {
     if (n>=0 && n<=20) {
       keys_config.key_6_timer = n;
     }
-    
+
     n = ui.getInt("key_7_timer");
     if (n>=0 && n<=20) {
       keys_config.key_7_timer = n;
@@ -360,7 +361,7 @@ void action(GyverPortal& p) {
     if (n>=0 && n<=20) {
       keys_config.key_6_delay = n;
     }
-    
+
     n = ui.getInt("key_7_delay");
     if (n>=0 && n<=20) {
       keys_config.key_7_delay = n;
@@ -521,7 +522,7 @@ void loop()
   unsigned int t = millis();
 
   ui.tick();
-  
+
   // Update the display if needed.
   if (update_display || t > next_update_time) {
     Serial.printf("loop %d %d\n", update_display, t);
