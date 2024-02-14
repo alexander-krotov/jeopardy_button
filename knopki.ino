@@ -41,6 +41,12 @@
 #define KEY_RED_LED 14
 #define KEY_GREEN_LED 13
 
+// 7-segment display:
+//   F
+//  E A
+//   G
+//  D B
+//   C
 #define SEG_A_LED 1
 #define SEG_B_LED 5
 #define SEG_C_LED 3
@@ -88,13 +94,13 @@ struct {
 
   int signal_volume;  // Sound signal volume (0-8)
 
-  bool countdown_beep;  // Signal countdown enabled (last 3 seconds in TIMER_STARTED)
+  int countdown_beep;  // Signal countdown last seconds in TIMER_STARTED
 } keys_config = {
   0, 0, 7,
   0, 0, 20,
   3, 4,
   8,
-  true
+  3
 };
 
 // Player number to print (1-4)
@@ -124,7 +130,7 @@ void IRAM_ATTR ISR()
     switch (state) {
       case STATE_INITIAL:
          {
-            int delay = 0;
+            int delay = 0; // Timer delay in ms.
             if (digitalRead(KEY_6_Pin)==LOW) {
               delay = keys_config.key_6_delay*1000+random(keys_config.key_6_random*1000)+1;
               timer_wait_time = keys_config.key_6_timer;
@@ -134,7 +140,7 @@ void IRAM_ATTR ISR()
             }
             if (delay != 0) {
               last_event_time = millis();
-              start_time = last_event_time+delay;
+              start_time = last_event_time+delay-1;
               state = STATE_RANDOM_WAIT;
               update_display = true;
               break;
@@ -195,8 +201,10 @@ void display_updater(int t)
       state = STATE_TIMER_STARTED;
 
   case STATE_TIMER_STARTED:
+    {
       Serial.println("STATE_STARTED");
-      if (t>=timer_off_time) {
+      int time_left = timer_off_time-t;
+      if (time_left <=0) {
         state = STATE_TIMER_ENDED;
         timer_off_time = t+keys_config.timer_pause*1000;
         update_display = true;
@@ -205,21 +213,21 @@ void display_updater(int t)
 
       // Show remaining time in the 7-segment display.
       // The segments will dissapear one by one, every second.
-      setRegisterPin(SEG_E_LED, t<=timer_off_time-7000);
-      setRegisterPin(SEG_A_LED, t<=timer_off_time-6000);
-      setRegisterPin(SEG_D_LED, t<=timer_off_time-5000);
-      setRegisterPin(SEG_B_LED, t<=timer_off_time-4000);
-      setRegisterPin(SEG_F_LED, t<=timer_off_time-3000);
-      setRegisterPin(SEG_G_LED, t<=timer_off_time-2000);
-      setRegisterPin(SEG_C_LED, t<=timer_off_time-1000);
+      setRegisterPin(SEG_E_LED, time_left>=7000);
+      setRegisterPin(SEG_A_LED, time_left>=6000);
+      setRegisterPin(SEG_D_LED, time_left>=5000);
+      setRegisterPin(SEG_B_LED, time_left>=4000);
+      setRegisterPin(SEG_F_LED, time_left>=3000);
+      setRegisterPin(SEG_G_LED, time_left>=2000);
+      setRegisterPin(SEG_C_LED, time_left>=1000);
 
       // Last three seconds - make a short beep every second.
-      if (keys_config.countdown_beep && t<=t-3000) {
+      if (time_left<=keys_config.countdown_beep*1000) {
         beep_1();
       }
       next_update_time = t+1000;
       break;
-
+    }
   case STATE_TIMER_ENDED:
       Serial.println("STATE_ENDED");
       clearRegisters();
@@ -330,7 +338,7 @@ void build()
   GP_MAKE_BOX(GP.LABEL("Timer pause:"); GP.NUMBER("timer_pause", "", keys_config.timer_pause););
   GP_MAKE_BOX(GP.LABEL("Display time:"); GP.NUMBER("display_delay", "", keys_config.display_delay););
   GP_MAKE_BOX(GP.LABEL("Signal volume:"); GP.NUMBER("signal_volume", "", keys_config.signal_volume););
-  GP_MAKE_BOX(GP.LABEL("Coundown beep"); GP.SWITCH("countdown_beep", keys_config.countdown_beep););
+  GP_MAKE_BOX(GP.LABEL("Countdown beep"); GP.NUMBER("countdown_beep", "", keys_config.countdown_beep););
 
   GP.SUBMIT("UPDATE");
 
@@ -391,7 +399,10 @@ void action(GyverPortal& p)
     if (n>=0 && n<=8) {
       keys_config.signal_volume = n;
     }
-    keys_config.countdown_beep = ui.getBool("countdown_beep");
+    n = ui.getInt("countdown_beep");
+    if (n>=0 && n<=20) {
+      keys_config.countdown_beep = n;
+    }
 
     // Save the config to eeprom
     EEPROM.put(0, keys_config);
