@@ -124,6 +124,9 @@ unsigned int start_time;
 // Display update needed flag.
 bool update_display;
 
+// Lock the web interface.
+bool locked = false;
+
 // Key press interrupt handler
 void IRAM_ATTR ISR()
 {
@@ -341,8 +344,12 @@ void build()
   GP_MAKE_BOX(GP.LABEL("Countdown beep"); GP.NUMBER("countdown_beep", "", keys_config.countdown_beep););
 
   GP.SUBMIT("UPDATE");
-
   GP.FORM_END();
+
+  GP.FORM_BEGIN("/lock");
+  GP.SUBMIT("LOCK");
+  GP.FORM_END();
+
   GP.BUILD_END();
 }
 
@@ -408,6 +415,10 @@ void action(GyverPortal& p)
     EEPROM.put(0, keys_config);
     EEPROM.commit();
   }
+  if (p.form("/lock")) {
+    locked = true;
+    WiFi.mode(WIFI_OFF); 
+  }
 }
 
 // Blink all the LEDs at startup
@@ -452,7 +463,7 @@ void setup()
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
-  /// server.begin();
+  locked = false;
 
   // start server portal
   ui.attachBuild(build);
@@ -515,7 +526,7 @@ void beep_signal()
   for (int i=0; i<100; i++) {
     dac_output_voltage(DAC_CHANNEL_2, sineLookupTable[i]*keys_config.signal_volume/8);
   }
-  // Important so set the voltage to 0 in the end, to avoid extra current
+  // Important to set the voltage to 0 in the end, to avoid extra current
   // remaining through the speaker.
 }
 
@@ -532,7 +543,9 @@ void loop()
   // Current time
   unsigned int t = millis();
 
-  ui.tick();
+  if (!locked) {
+    ui.tick();
+  }
 
   // Update the display if needed.
   if (update_display || t > next_update_time) {
