@@ -28,6 +28,22 @@ Hardware schematics placed at https://oshwlab.com/alexander.krotov/esp32-knopki
 
 Диаграмма перехода состояний кнопочной системы
 
+```mermaid
+graph TD;
+    subgraph Timer_not_started
+    INITIAL-->|Start pressed|RANDOM_WAIT;
+    TIMER_ENDED-->|Aftertimer delay|INITIAL;
+    end
+    RANDOM_WAIT-->|Random delay|TIMER_STARTED;
+    TIMER_STARTED-->|Timer delay|TIMER_ENDED;
+    TIMER_STARTED-->|"Key pressed (1-4)"|SHOW_PLAYER;
+    SHOW_PLAYER-->|Display delay|INITIAL;
+    style SHOW_PLAYER color:green;
+    Timer_not_started-->|"Key pressed (1-4)"|SHOW_FALSE_START;
+    SHOW_FALSE_START-->|Display delay|INITIAL;
+    style SHOW_FALSE_START color:red;
+```
+
 ![State transition diagram](https://github.com/alexander-krotov/jeopardy_button/blob/main/states.png?raw=true)
 
 Начальное состояние системы: INITIAL. В этом состоянии вся индикация погашена, и мы произвольно долго находимся там пока не будет нажата какая-либо кнопка.
