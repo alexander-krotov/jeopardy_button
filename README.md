@@ -3,7 +3,13 @@
 Hardware: control board is based on ESP32 SOC module WROOM-32. It features a 7-segment display to show the players number, small-size speaker for sound signals and few leds to indicate the player, false-start or correct timing signal.
 It allows 4 players, each player has his own "console" (push-button and signaling led). Consoles are connected to the control board with phone RJ- connectors and phone wires.
 
+System states transition diagram:
+
+![Control panel](https://github.com/alexander-krotov/jeopardy_button/blob/main/states.png?raw=true)
+
 Hardware schematics placed at https://oshwlab.com/alexander.krotov/esp32-knopki
+
+This kind of games are very popular in Russian, and the design description below is in Russian.
 
 # Железо и софт для "Своей игры"
 
