@@ -56,6 +56,9 @@
 #define SEG_G_LED 4
 #define SEG_DP_LED 7
 
+// Maximum timeout we allow.
+const int max_timer_len=20;
+
 // Web interface
 GyverPortal ui;
 
@@ -77,7 +80,7 @@ enum {
     STATE_SHOW_FALSE_START
 } state;
 
-// Coniguration parameters.
+// Configuration parameters.
 struct {
   // Timer 1
   int key_6_delay;    // INITIAL -> TIMER_STARTED
@@ -216,13 +219,13 @@ void display_updater(int t)
 
       // Show remaining time in the 7-segment display.
       // The segments will dissapear one by one, every second.
-      setRegisterPin(SEG_E_LED, time_left>=7000);
       setRegisterPin(SEG_A_LED, time_left>=6000);
-      setRegisterPin(SEG_D_LED, time_left>=5000);
+      setRegisterPin(SEG_F_LED, time_left>=5000);
       setRegisterPin(SEG_B_LED, time_left>=4000);
-      setRegisterPin(SEG_F_LED, time_left>=3000);
-      setRegisterPin(SEG_G_LED, time_left>=2000);
-      setRegisterPin(SEG_C_LED, time_left>=1000);
+      setRegisterPin(SEG_G_LED, time_left>=3000);
+      setRegisterPin(SEG_C_LED, time_left>=2000);
+      setRegisterPin(SEG_E_LED, time_left>=1000);
+      setRegisterPin(SEG_D_LED, time_left>=0);
 
       // Last three seconds - make a short beep every second.
       if (time_left<=keys_config.countdown_beep*1000) {
@@ -234,14 +237,15 @@ void display_updater(int t)
   case STATE_TIMER_ENDED:
       Serial.println("STATE_ENDED");
       clearRegisters();
-      beep_1();
-      beep_1();
       if (t>=timer_off_time) {
         state = STATE_INITIAL;
         update_display = true;
         break;
       }
       setRegisterPin(SEG_DP_LED, HIGH);
+      beep_1();
+      beep_1();
+      next_update_time = timer_off_time;
       break;
 
   case STATE_SHOW_PLAYER:
@@ -353,7 +357,7 @@ void build()
   GP.BUILD_END();
 }
 
-// Read the configuration from a form
+// Read the configuration update from a form
 void action(GyverPortal& p)
 {
   Serial.println("ACTION");
@@ -363,42 +367,42 @@ void action(GyverPortal& p)
 
     // Reed the new values, and check them for sanity.
     n = ui.getInt("key_6_timer");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.key_6_timer = n;
     }
 
     n = ui.getInt("key_7_timer");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.key_7_timer = n;
     }
 
     n = ui.getInt("key_6_delay");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.key_6_delay = n;
     }
 
     n = ui.getInt("key_7_delay");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.key_7_delay = n;
     }
 
     n = ui.getInt("key_6_random");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.key_6_random = n;
     }
 
     n = ui.getInt("key_7_random");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.key_7_random = n;
     }
 
     n = ui.getInt("timer_pause");
-    if (n>=1 && n<=20) {
+    if (n>=1 && n<=max_timer_len) {
       keys_config.timer_pause = n;
     }
 
     n = ui.getInt("display_delay");
-    if (n>=1 && n<=20) {
+    if (n>=1 && n<=max_timer_len) {
       keys_config.display_delay = n;
     }
 
@@ -407,7 +411,7 @@ void action(GyverPortal& p)
       keys_config.signal_volume = n;
     }
     n = ui.getInt("countdown_beep");
-    if (n>=0 && n<=20) {
+    if (n>=0 && n<=max_timer_len) {
       keys_config.countdown_beep = n;
     }
 
@@ -421,12 +425,12 @@ void action(GyverPortal& p)
   }
 }
 
-// Blink all the LEDs at startup
+// Blink all the LEDs and make short beeps at startup
 void welcome_display()
 {
   clearRegisters();
 
-  for (int i=0; i<16; i++) {
+  for (int i=0; i<numOfRegisterPins; i++) {
     setRegisterPin(i, HIGH);
     writeRegisters();
     delay(100);
@@ -434,7 +438,7 @@ void welcome_display()
 
   beep_1();
 
-  for (int i=0; i<16; i++) {
+  for (int i=0; i<numOfRegisterPins; i++) {
     setRegisterPin(i, LOW);
     writeRegisters();
     delay(100);
@@ -543,6 +547,7 @@ void loop()
   // Current time
   unsigned int t = millis();
 
+  // Handle the web ui requests (if any).
   if (!locked) {
     ui.tick();
   }
@@ -561,11 +566,8 @@ void loop()
 // Clear the shift registers, all the LEDs get blank.
 void clearRegisters()
 {
-  for (int i=0; i<8; i++){
-     registers[i] = HIGH;
-  }
-  for (int i=8; i<16; i++){
-     registers[i] = LOW;
+  for (int i=0; i<numOfRegisterPins; i++) {
+    setRegisterPin(i, LOW);
   }
 }
 
@@ -574,7 +576,7 @@ void writeRegisters()
 {
   // Write register after being set
   digitalWrite(RCLK_Pin, LOW);
-  for (int i = numOfRegisterPins-1; i>=0; i--){
+  for (int i = numOfRegisterPins-1; i>=0; i--) {
     digitalWrite(SRCLK_Pin, LOW);
     int val = registers[i];
     digitalWrite(SER_Pin, val);
